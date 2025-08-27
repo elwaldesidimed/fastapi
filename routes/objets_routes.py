@@ -1,28 +1,106 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from models.schemas import Objet
-from services.objets_services import ajouter_objet, get_objets_par_utilisateur
-from utils.jwt_utils import get_current_user
+from utils.security import get_current_user
+from database.mongo import db
 
-router = APIRouter(prefix="/objets", tags=["Objets"])
+router = APIRouter()
 
-# ✅ Ajouter un objet (protégé)
 @router.post("/")
 async def create_objet(objet: Objet, current_user: dict = Depends(get_current_user)):
-    if not objet.capteurId or not objet.type or not objet.emplacement:
-        raise HTTPException(status_code=400, detail="Tous les champs de l'objet sont requis")
+    """
+    Ajouter un nouvel objet IoT pour l'utilisateur connecté
+    """
+    # Vérifier si le capteur existe déjà
+    existing = await db["objets"].find_one({"capteurId": objet.capteurId})
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Capteur déjà enregistré"
+        )
+    
+    # Préparer les données de l'objet
+    objet_dict = objet.model_dump()
+    objet_dict["utilisateur"] = current_user["id"]  # Assigner à l'utilisateur connecté
+    
+    # Insérer dans MongoDB
+    result = await db["objets"].insert_one(objet_dict)
+    
+    return {
+        "message": "Objet ajouté avec succès",
+        "objet_id": str(result.inserted_id)
+    }
 
-    objet.utilisateur = current_user["id"]
-
-    success = await ajouter_objet(objet)
-    if not success:
-        raise HTTPException(status_code=500, detail="Échec de l'ajout de l'objet")
-
-    return {"message": "Objet ajouté avec succès"}
-
-# ✅ Obtenir les objets d’un utilisateur (protégé)
 @router.get("/")
 async def get_objets(current_user: dict = Depends(get_current_user)):
-    objets = await get_objets_par_utilisateur(current_user["id"])
-    if objets is None:
-        raise HTTPException(status_code=404, detail="Aucun objet trouvé pour cet utilisateur")
-    return objets
+    """
+    Récupérer tous les objets de l'utilisateur connecté
+    """
+    # Récupérer les objets de l'utilisateur
+    cursor = db["objets"].find({"utilisateur": current_user["id"]})
+    objets = []
+    
+    async for obj in cursor:
+        obj["id"] = str(obj.pop("_id"))  # Convertir _id en id
+        objets.append(obj)
+    
+    return {
+        "message": f"Trouvé {len(objets)} objets",
+        "objets": objets
+    }
+
+@router.get("/{objet_id}")
+async def get_objet_by_id(objet_id: str, current_user: dict = Depends(get_current_user)):
+    """
+    Récupérer un objet spécifique par son ID
+    """
+    from bson import ObjectId
+    
+    try:
+        # Chercher l'objet par ID et utilisateur
+        objet = await db["objets"].find_one({
+            "_id": ObjectId(objet_id),
+            "utilisateur": current_user["id"]
+        })
+        
+        if not objet:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Objet non trouvé"
+            )
+        
+        objet["id"] = str(objet.pop("_id"))
+        return objet
+        
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="ID d'objet invalide"
+        )
+
+@router.delete("/{objet_id}")
+async def delete_objet(objet_id: str, current_user: dict = Depends(get_current_user)):
+    """
+    Supprimer un objet de l'utilisateur connecté
+    """
+    from bson import ObjectId
+    
+    try:
+        # Supprimer l'objet
+        result = await db["objets"].delete_one({
+            "_id": ObjectId(objet_id),
+            "utilisateur": current_user["id"]
+        })
+        
+        if result.deleted_count == 0:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Objet non trouvé ou non autorisé"
+            )
+        
+        return {"message": "Objet supprimé avec succès"}
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="ID d'objet invalide"
+        )

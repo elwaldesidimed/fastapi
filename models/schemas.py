@@ -1,86 +1,43 @@
-# models/schemas.py
 from typing import Optional
 from pydantic import BaseModel, Field, EmailStr
-from bson import ObjectId
-from pydantic import GetCoreSchemaHandler
-from pydantic_core import core_schema
-from typing import Any
 
-class PyObjectId(ObjectId):
-    @classmethod
-    def __get_pydantic_core_schema__(
-        cls, source_type: Any, handler: GetCoreSchemaHandler
-    ) -> core_schema.CoreSchema:
-        return core_schema.no_info_after_validator_function(
-            cls.validate, core_schema.str_schema()
-        )
-
-    @classmethod
-    def validate(cls, v):
-        if isinstance(v, ObjectId):
-            return str(v)
-        if isinstance(v, str) and ObjectId.is_valid(v):
-            return str(ObjectId(v))
-        raise ValueError("Invalid ObjectId")
-
-
-
+# ✅ Modèle pour créer un utilisateur (inscription)
 class UserCreate(BaseModel):
     email: EmailStr
     password: str = Field(..., min_length=6)
-    username: Optional[str] = None  
+    username: str
 
-# ✅ نموذج تسجيل الدخول
+# ✅ Modèle pour connexion utilisateur
 class UserLogin(BaseModel):
     email: EmailStr
     password: str
 
-
-# ✅ نموذج المستخدم كما في قاعدة البيانات
-class UserModel(BaseModel):
-    id: Optional[PyObjectId] = Field(default_factory=PyObjectId, alias="_id")
+# ✅ Modèle de réponse utilisateur (sans mot de passe)
+class UserResponse(BaseModel):
+    id: str
+    email: str
     username: str
-    email: EmailStr
 
-    model_config = {
-        "populate_by_name": True,
-        "arbitrary_types_allowed": True,
-        "json_encoders": {ObjectId: str}
-    }
-
-
-# ✅ نموذج المستخدم مع كلمة مرور مشفرة
-class UserInDB(UserModel):
-    hashed_password: str
-
-
-# ✅ نموذج الكائن (Objet)
+# ✅ Modèle d'objet IoT
 class Objet(BaseModel):
-    id: Optional[PyObjectId] = Field(default_factory=PyObjectId, alias="_id")
     nom: str
     type: str
-    utilisateur_id: str
+    emplacement: str
+    capteurId: str
+    utilisateur: Optional[str] = None
 
-    model_config = {
-        "arbitrary_types_allowed": True,
-        "json_encoders": {ObjectId: str}
-    }
-
-
-# ✅ نموذج البيانات (Donnée)
+# ✅ Modèle de données de capteur
 class Donnee(BaseModel):
     capteurId: str
     valeur: float
     timestamp: str
 
-
-# ✅ نموذج العتبة (Seuil)
+# ✅ Modèle de seuil d'alerte
 class Seuil(BaseModel):
     capteurId: str
     seuil_max: float
 
-
-# ✅ نموذج التنبيه (Alerte)
+# ✅ Modèle d'alerte
 class Alerte(BaseModel):
     capteurId: str
     valeur: float
